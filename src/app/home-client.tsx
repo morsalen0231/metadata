@@ -278,6 +278,14 @@ const toBlob = async (dataUrl: string) => {
   return response.blob();
 };
 
+const binaryStringToDataUrl = (bytes: Uint8Array, mimeType: string) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not rebuild the image."));
+    reader.readAsDataURL(new Blob([bytes], { type: mimeType }));
+  });
+
 const fileToDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -294,10 +302,10 @@ const fileToArrayBuffer = (file: File) =>
     reader.readAsArrayBuffer(file);
   });
 
-const cleanImageWithServer = async (file: File) => {
+const cleanImageWithServer = async (file: File,iccProfile: "srgb" | "p3" = "srgb") => {
   const formData = new FormData();
   formData.append("file", file);
-
+formData.append("iccProfile", iccProfile); 
   const response = await fetch("/api/clean-image", {
     method: "POST",
     body: formData,
@@ -328,6 +336,66 @@ const loadImageElement = (dataUrl: string) =>
     image.onerror = () => reject(new Error("Could not render the image."));
     image.src = dataUrl;
   });
+
+const removeIccFromDataUrl = async (dataUrl: string): Promise<string> => {
+  const sourceBlob = await toBlob(dataUrl);
+  const sourceBytes = new Uint8Array(await sourceBlob.arrayBuffer());
+
+  if (sourceBytes.length < 4 || sourceBytes[0] !== 0xff || sourceBytes[1] !== 0xd8) {
+    return dataUrl;
+  }
+
+  const chunks: Uint8Array[] = [sourceBytes.subarray(0, 2)];
+  let offset = 2;
+
+  while (offset < sourceBytes.length) {
+    if (sourceBytes[offset] !== 0xff) {
+      break;
+    }
+
+    const marker = sourceBytes[offset + 1];
+
+    if (marker === 0xda) {
+      chunks.push(sourceBytes.subarray(offset));
+      break;
+    }
+
+    if (offset + 3 >= sourceBytes.length) {
+      break;
+    }
+
+    const segmentLength = (sourceBytes[offset + 2] << 8) | sourceBytes[offset + 3];
+    const segmentEnd = offset + 2 + segmentLength;
+
+    if (segmentEnd > sourceBytes.length) {
+      break;
+    }
+
+    if (marker === 0xe2) {
+      const tagBytes = sourceBytes.subarray(offset + 4, offset + 16);
+      const tag = new TextDecoder("ascii").decode(tagBytes);
+
+      if (tag.startsWith("ICC_PROFILE")) {
+        offset = segmentEnd;
+        continue;
+      }
+    }
+
+    chunks.push(sourceBytes.subarray(offset, segmentEnd));
+    offset = segmentEnd;
+  }
+
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Uint8Array(totalLength);
+  let writeOffset = 0;
+
+  chunks.forEach((chunk) => {
+    merged.set(chunk, writeOffset);
+    writeOffset += chunk.length;
+  });
+
+  return binaryStringToDataUrl(merged, "image/jpeg");
+};
 
 const safeExifLoad = (dataUrl: string): ExifDataShape => {
   try {
@@ -594,7 +662,11 @@ const stripEmptyMetadata = (metadata: MetadataMap) =>
     Object.entries(metadata).filter(([key, value]) => {
       const normalizedKey = key.trim().toLowerCase();
 
-      if (normalizedKey === "profile_copyright" || normalizedKey === "profilecopyright") {
+      if (
+        normalizedKey === "profile_copyright" ||
+        normalizedKey === "profilecopyright" ||
+        normalizedKey === "profile copyright"
+      ) {
         return false;
       }
 
@@ -690,6 +762,10 @@ const buildSanitizedExif = (
   
      
 const subSec = String(randomInRange(100, 999));
+const subSec2 = String(randomInRange(100, 999));
+const subSec3 = String(randomInRange(100, 999));
+
+
   const exif: ExifDataShape = {
     "0th": {
       [piexif.ImageIFD.Make]: preset.make,
@@ -717,8 +793,8 @@ const subSec = String(randomInRange(100, 999));
       // subsec (device behavior)
       ...(preset.hasSubSecTime && {
      [piexif.ExifIFD.SubSecTime]: subSec,
-[piexif.ExifIFD.SubSecTimeOriginal]: subSec,
-[piexif.ExifIFD.SubSecTimeDigitized]: subSec,
+[piexif.ExifIFD.SubSecTimeOriginal]: subSec2,
+[piexif.ExifIFD.SubSecTimeDigitized]: subSec3,
       }),
 
       // exposure physics
@@ -861,7 +937,10 @@ const handleInject = async () => {
     setBusy(true);
 
     try {
-      const normalized = await cleanImageWithServer(readResult.sourceFile);
+      const normalized = await cleanImageWithServer(
+  readResult.sourceFile,
+  selectedPreset.iccProfile // এটা pass করুন
+);
 
       // FORCE REMOVE ALL OLD METADATA
       const cleanCanvas = document.createElement("canvas");
@@ -874,15 +953,22 @@ const handleInject = async () => {
       ctx?.drawImage(img, 0, 0);
 
       // FIX #4 & #6: quality 0.92 — Samsung real quality এর কাছাকাছি
-      const fullyCleanDataUrl = cleanCanvas.toDataURL("image/jpeg", 0.92);
+     
+
+      const fullyCleanDataUrl = await removeIccFromDataUrl(
+        cleanCanvas.toDataURL("image/jpeg", 0.92)
+      );
+
+
+
       const cleanedImage = await loadImageElement(fullyCleanDataUrl);
 
       const currentDateTime = formatDateTime();
 
       const exifData = sanitizeEnabled
         ? buildSanitizedExif(selectedPreset, currentDateTime, {
-            width: cleanedImage.naturalWidth || cleanedImage.width,
-            height: cleanedImage.naturalHeight || cleanedImage.height,
+              width: cleanedImage.naturalWidth,
+  height: cleanedImage.naturalHeight,
           })
         : safeExifLoad(normalized.dataUrl);
 
@@ -892,7 +978,7 @@ const handleInject = async () => {
       // FIX #2: GPS — Samsung/iPhone-এ GPSVersionID সবসময় থাকে
       if (selectedPreset.hasGpsVersionId) {
         exifData.GPS = {
-          [piexif.GPSIFD.GPSVersionID]: [2, 3, 0, 0],
+          
         };
       } else {
         // Canon DSLR-এ GPS নেই — empty রাখা স্বাভাবিক
@@ -965,14 +1051,9 @@ const handleInject = async () => {
 
       setUpdatedMetadata({
         ...parsedMetadata,
-        Sanitized: sanitizeEnabled ? "Yes" : "No",
-        OriginalFileType: readResult.originalType,
-        AutoConvertedToJpeg: normalized.convertedToJpeg ? "Yes" : "No",
-        OutputFileName: updatedFile.name,
-        InjectedBrand: selectedPreset.brand,
-        InjectedDevice: selectedPreset.name,
-        InjectedPresetId: selectedPreset.id,
-        InjectedExposureProgram: selectedPreset.exposureProgram,
+        
+        
+        
       });
 
       setDownloadUrl(URL.createObjectURL(updatedBlob));

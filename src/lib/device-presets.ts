@@ -3,6 +3,7 @@ export type DevicePreset = {
   brand: string;
   name: string;
 hasGpsVersionId: boolean;
+
   // identity
   make: string;
   model: string;
@@ -26,12 +27,14 @@ hasGpsVersionId: boolean;
 
   // behavior
   filenameStyle: "samsung" | "iphone" | "canon";
+   iccProfile: "srgb" | "p3";
   hasSubSecTime: boolean;
 };
 
 export const devicePresets: DevicePreset[] = [
   {
     id: "samsung-s23-ultra",
+    iccProfile: "srgb",
     brand: "Samsung",
     name: "Galaxy S23 Ultra",
     hasGpsVersionId: true,
@@ -61,6 +64,7 @@ export const devicePresets: DevicePreset[] = [
     brand: "Samsung",
     name: "Galaxy S24 Ultra",
 hasGpsVersionId: true,
+iccProfile: "srgb",
     make: "Samsung",
     model: "SM-S928B",
     software: "S928BXXU2AXE4",
@@ -85,7 +89,7 @@ hasGpsVersionId: true,
     id: "iphone-15-pro-max",
     brand: "Apple",
     name: "iPhone 15 Pro Max",
-
+iccProfile: "p3",
     make: "Apple",
     model: "iPhone 15 Pro Max",
     software: "17.6.1",
@@ -102,16 +106,17 @@ hasGpsVersionId: true,
 
     resolution: [4032, 3024],
     colorSpace: 1,
-hasGpsVersionId: false,
+hasGpsVersionId: true,
     filenameStyle: "iphone",
     hasSubSecTime: true,
   },
 
   {
     id: "iphone-14-pro",
+    iccProfile: "p3",
     brand: "Apple",
     name: "iPhone 14 Pro",
-hasGpsVersionId: false,
+hasGpsVersionId: true,
     make: "Apple",
     model: "iPhone 14 Pro",
     software: "17.5.1",
@@ -135,6 +140,7 @@ hasGpsVersionId: false,
 
   {
     id: "canon-5d-mark-iv",
+    iccProfile: "srgb",
     brand: "Canon",
     name: "EOS 5D Mark IV",
 hasGpsVersionId: false,
@@ -160,6 +166,7 @@ hasGpsVersionId: false,
   },
   {
   id: "samsung-a73",
+  iccProfile: "srgb",
   brand: "Samsung",
   name: "Galaxy A73",
 hasGpsVersionId: true,
@@ -184,6 +191,7 @@ hasGpsVersionId: true,
 },
 {
   id: "samsung-s22-ultra",
+  iccProfile: "srgb",
   brand: "Samsung",
   name: "Galaxy S22 Ultra",
 hasGpsVersionId: true,
@@ -208,6 +216,7 @@ hasGpsVersionId: true,
 },
 {
   id: "samsung-s21-ultra",
+iccProfile: "srgb",
   brand: "Samsung",
   name: "Galaxy S21 Ultra",
 hasGpsVersionId: true,
