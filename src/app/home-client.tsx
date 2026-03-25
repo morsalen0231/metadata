@@ -283,7 +283,8 @@ const binaryStringToDataUrl = (bytes: Uint8Array, mimeType: string) =>
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error("Could not rebuild the image."));
-    reader.readAsDataURL(new Blob([bytes], { type: mimeType }));
+    const safeBytes = new Uint8Array(bytes);
+    reader.readAsDataURL(new Blob([safeBytes.buffer], { type: mimeType }));
   });
 
 const fileToDataUrl = (file: File) =>
