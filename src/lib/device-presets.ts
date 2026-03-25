@@ -2,7 +2,7 @@ export type DevicePreset = {
   id: string;
   brand: string;
   name: string;
-
+hasGpsVersionId: boolean;
   // identity
   make: string;
   model: string;
@@ -34,6 +34,7 @@ export const devicePresets: DevicePreset[] = [
     id: "samsung-s23-ultra",
     brand: "Samsung",
     name: "Galaxy S23 Ultra",
+    hasGpsVersionId: true,
 
     make: "Samsung",
     model: "SM-S918B",
@@ -59,7 +60,7 @@ export const devicePresets: DevicePreset[] = [
     id: "samsung-s24-ultra",
     brand: "Samsung",
     name: "Galaxy S24 Ultra",
-
+hasGpsVersionId: true,
     make: "Samsung",
     model: "SM-S928B",
     software: "S928BXXU2AXE4",
@@ -101,7 +102,7 @@ export const devicePresets: DevicePreset[] = [
 
     resolution: [4032, 3024],
     colorSpace: 1,
-
+hasGpsVersionId: false,
     filenameStyle: "iphone",
     hasSubSecTime: true,
   },
@@ -110,7 +111,7 @@ export const devicePresets: DevicePreset[] = [
     id: "iphone-14-pro",
     brand: "Apple",
     name: "iPhone 14 Pro",
-
+hasGpsVersionId: false,
     make: "Apple",
     model: "iPhone 14 Pro",
     software: "17.5.1",
@@ -136,7 +137,7 @@ export const devicePresets: DevicePreset[] = [
     id: "canon-5d-mark-iv",
     brand: "Canon",
     name: "EOS 5D Mark IV",
-
+hasGpsVersionId: false,
     make: "Canon",
     model: "Canon EOS 5D Mark IV",
     software: "1.4.0",
@@ -161,7 +162,7 @@ export const devicePresets: DevicePreset[] = [
   id: "samsung-a73",
   brand: "Samsung",
   name: "Galaxy A73",
-
+hasGpsVersionId: true,
   make: "Samsung",
   model: "SM-A736B",
   software: "A736BXXS6CXA1",
@@ -185,7 +186,7 @@ export const devicePresets: DevicePreset[] = [
   id: "samsung-s22-ultra",
   brand: "Samsung",
   name: "Galaxy S22 Ultra",
-
+hasGpsVersionId: true,
   make: "Samsung",
   model: "SM-S908B",
   software: "S908BXXS7DXA1",
@@ -209,7 +210,7 @@ export const devicePresets: DevicePreset[] = [
   id: "samsung-s21-ultra",
   brand: "Samsung",
   name: "Galaxy S21 Ultra",
-
+hasGpsVersionId: true,
   make: "Samsung",
   model: "SM-G998B",
   software: "G998BXXS9DXA1",

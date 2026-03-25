@@ -95,6 +95,71 @@ const formatDateTime = () => {
   return `${now.getFullYear()}:${pad(now.getMonth() + 1)}:${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 };
 
+const sanitizeMetadataText = (value: unknown) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const withoutControls = value.replace(/[\u0000-\u001F\u007F-\u009F\uFFFD]+/g, "").trim();
+  const exifDateMatch = withoutControls.match(/\d{4}:\d{1,2}:\d{1,2}(?: \d{1,2}:\d{1,2}:\d{1,2})?/);
+
+  if (exifDateMatch) {
+    return exifDateMatch[0];
+  }
+
+  return withoutControls;
+};
+
+const normalizeExifDateValue = (value: unknown) => {
+  const sanitized = sanitizeMetadataText(value);
+
+  if (typeof sanitized !== "string") {
+    return null;
+  }
+
+  const match = sanitized.match(
+    /(\d{4}):(\d{1,2}):(\d{1,2})(?: (\d{1,2}):(\d{1,2}):(\d{1,2}))?/,
+  );
+
+  if (!match) {
+    return sanitized || null;
+  }
+
+  const [, year, month, day, hour = "0", minute = "0", second = "0"] = match;
+  const pad = (input: string) => input.padStart(2, "0");
+
+  return `${year}:${pad(month)}:${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)}`;
+};
+
+const isDateLikeMetadataKey = (key: string) => /date|time/i.test(key);
+
+const isPlausibleMetadataDate = (date: Date) => {
+  const year = date.getFullYear();
+
+  return Number.isFinite(date.getTime()) && year >= 1990 && year <= 2100;
+};
+
+const formatDisplayDate = (date: Date) =>
+  date.toLocaleString("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+const normalizeGenericDateString = (value: string) => {
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime()) || !isPlausibleMetadataDate(parsed)) {
+    return null;
+  }
+
+  return formatDisplayDate(parsed);
+};
+
 const randomDigits = (length: number) => {
   let result = "";
 
@@ -145,6 +210,10 @@ const buildDeviceFileName = (preset: (typeof devicePresets)[number]) => {
     return `IMG_${randomDigits(4)}.JPG`;
   }
 
+  if (preset.filenameStyle === "canon") {
+    return `_MG_${randomDigits(4)}.JPG`;
+  }
+
   return `IMG_${randomDigits(4)}.JPG`;
 };
 
@@ -154,21 +223,40 @@ const formatMetadata = (raw: Record<string, unknown> | null | undefined): Metada
   }
 
   return Object.entries(raw).reduce<MetadataMap>((acc, [key, value]) => {
+    // ExposureTime কে fraction হিসেবে দেখাও
+    if (key === "ExposureTime" && typeof value === "number" && value < 1) {
+      const denominator = Math.round(1 / value);
+      acc[key] = `1/${denominator}`;
+      return acc;
+    }
+
     if (value instanceof Date) {
-      acc[key] = value.toLocaleString("en-GB", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
+      if (!isDateLikeMetadataKey(key) || isPlausibleMetadataDate(value)) {
+        acc[key] = formatDisplayDate(value);
+      }
       return acc;
     }
 
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      acc[key] = value;
+      if (typeof value === "string" && isDateLikeMetadataKey(key)) {
+        const exifDate = normalizeExifDateValue(value);
+
+        if (exifDate) {
+          acc[key] = exifDate;
+          return acc;
+        }
+
+        const genericDate = normalizeGenericDateString(value);
+
+        if (genericDate) {
+          acc[key] = genericDate;
+          return acc;
+        }
+
+        return acc;
+      }
+
+      acc[key] = sanitizeMetadataText(value) as MetadataValue;
       return acc;
     }
 
@@ -261,21 +349,33 @@ const extractPiexifMetadata = (dataUrl: string): MetadataMap => {
     const exifData = piexif.load(dataUrl);
 
     return {
-      Make: typeof exifData["0th"][piexif.ImageIFD.Make] === "string" ? String(exifData["0th"][piexif.ImageIFD.Make]) : null,
-      Model: typeof exifData["0th"][piexif.ImageIFD.Model] === "string" ? String(exifData["0th"][piexif.ImageIFD.Model]) : null,
-      Software: typeof exifData["0th"][piexif.ImageIFD.Software] === "string" ? String(exifData["0th"][piexif.ImageIFD.Software]) : null,
-      DateTime: typeof exifData["0th"][piexif.ImageIFD.DateTime] === "string" ? String(exifData["0th"][piexif.ImageIFD.DateTime]) : null,
+      Make:
+        typeof exifData["0th"][piexif.ImageIFD.Make] === "string"
+          ? String(sanitizeMetadataText(exifData["0th"][piexif.ImageIFD.Make]))
+          : null,
+      Model:
+        typeof exifData["0th"][piexif.ImageIFD.Model] === "string"
+          ? String(sanitizeMetadataText(exifData["0th"][piexif.ImageIFD.Model]))
+          : null,
+      Software:
+        typeof exifData["0th"][piexif.ImageIFD.Software] === "string"
+          ? String(sanitizeMetadataText(exifData["0th"][piexif.ImageIFD.Software]))
+          : null,
+      DateTime:
+        typeof exifData["0th"][piexif.ImageIFD.DateTime] === "string"
+          ? normalizeExifDateValue(exifData["0th"][piexif.ImageIFD.DateTime])
+          : null,
       DateTimeOriginal:
         typeof exifData.Exif[piexif.ExifIFD.DateTimeOriginal] === "string"
-          ? String(exifData.Exif[piexif.ExifIFD.DateTimeOriginal])
+          ? normalizeExifDateValue(exifData.Exif[piexif.ExifIFD.DateTimeOriginal])
           : null,
       DateTimeDigitized:
         typeof exifData.Exif[piexif.ExifIFD.DateTimeDigitized] === "string"
-          ? String(exifData.Exif[piexif.ExifIFD.DateTimeDigitized])
+          ? normalizeExifDateValue(exifData.Exif[piexif.ExifIFD.DateTimeDigitized])
           : null,
       LensModel:
         typeof exifData.Exif[piexif.ExifIFD.LensModel] === "string"
-          ? String(exifData.Exif[piexif.ExifIFD.LensModel])
+          ? String(sanitizeMetadataText(exifData.Exif[piexif.ExifIFD.LensModel]))
           : null,
     };
   } catch {
@@ -458,9 +558,9 @@ const readExifMetadata = async (file: File): Promise<{ metadata: MetadataMap; no
     const parsed = await exifr.parse(file, {
       tiff: true,
       xmp: true,
-      icc: true,
+      icc: false,
       iptc: true,
-      jfif: true,
+      jfif: false,
       ihdr: true,
       exif: true,
       gps: true,
@@ -586,11 +686,10 @@ const buildSanitizedExif = (
   // dynamic exposure simulation
   const iso = randomInRange(...preset.isoRange);
   const exposureDenominator = randomInRange(...preset.shutterRange);
-     const size = randomInRange(1200, 2500);
-const makerNote = new Uint8Array(size).map(() =>
-  Math.floor(Math.random() * 256)
-);
 
+  
+     
+const subSec = String(randomInRange(100, 999));
   const exif: ExifDataShape = {
     "0th": {
       [piexif.ImageIFD.Make]: preset.make,
@@ -617,9 +716,9 @@ const makerNote = new Uint8Array(size).map(() =>
 
       // subsec (device behavior)
       ...(preset.hasSubSecTime && {
-        [piexif.ExifIFD.SubSecTime]: String(randomInRange(100, 999)),
-        [piexif.ExifIFD.SubSecTimeOriginal]: String(randomInRange(100, 999)),
-        [piexif.ExifIFD.SubSecTimeDigitized]: String(randomInRange(100, 999)),
+     [piexif.ExifIFD.SubSecTime]: subSec,
+[piexif.ExifIFD.SubSecTimeOriginal]: subSec,
+[piexif.ExifIFD.SubSecTimeDigitized]: subSec,
       }),
 
       // exposure physics
@@ -635,22 +734,22 @@ const makerNote = new Uint8Array(size).map(() =>
   [piexif.ExifIFD.SensingMethod]: 2,
   [piexif.ExifIFD.ExposureMode]: 0,
   [piexif.ExifIFD.CustomRendered]: 0,
-  [piexif.ExifIFD.ExposureBiasValue]:  [randomInRange(-2, 2), 1],
+  [piexif.ExifIFD.ExposureBiasValue]:  [0, 1],
 [piexif.ExifIFD.MaxApertureValue]: [Math.round(preset.fNumber * 100), 100],
 
       [piexif.ExifIFD.MeteringMode]: 5,
       [piexif.ExifIFD.LightSource]: 0,
       [piexif.ExifIFD.Flash]: 0,
       [piexif.ExifIFD.WhiteBalance]: 0,
-[piexif.ExifIFD.SceneType]: 1,
-[piexif.ExifIFD.FileSource]: 3,
+[piexif.ExifIFD.SceneType]: "\x01",   
+[piexif.ExifIFD.FileSource]: "\x03",
       // lens
       [piexif.ExifIFD.LensModel]: preset.lensModel,
       ...(preset.lensMake && {
         [piexif.ExifIFD.LensMake]: preset.lensMake,
       }),
  
-[piexif.ExifIFD.MakerNote]: makerNote,
+
 
       // image info
       [piexif.ExifIFD.ColorSpace]: preset.colorSpace,
@@ -658,10 +757,7 @@ const makerNote = new Uint8Array(size).map(() =>
       [piexif.ExifIFD.PixelYDimension]: dimensions?.height ?? preset.resolution[1],
 
       // subtle realism (not too perfect)
-      [piexif.ExifIFD.BodySerialNumber]: `${preset.model}-${randomInRange(
-        100000,
-        999999
-      )}`,
+     [piexif.ExifIFD.BodySerialNumber]: randomDigits(10),
     },
 
     GPS: {},
@@ -757,7 +853,7 @@ export default function Home() {
     }
   };
 
-  const handleInject = async () => {
+const handleInject = async () => {
     if (!readResult || !selectedPreset) {
       return;
     }
@@ -766,8 +862,23 @@ export default function Home() {
 
     try {
       const normalized = await cleanImageWithServer(readResult.sourceFile);
-      const cleanedImage = await loadImageElement(normalized.dataUrl);
+
+      // FORCE REMOVE ALL OLD METADATA
+      const cleanCanvas = document.createElement("canvas");
+      const img = await loadImageElement(normalized.dataUrl);
+
+      cleanCanvas.width = img.naturalWidth;
+      cleanCanvas.height = img.naturalHeight;
+
+      const ctx = cleanCanvas.getContext("2d");
+      ctx?.drawImage(img, 0, 0);
+
+      // FIX #4 & #6: quality 0.92 — Samsung real quality এর কাছাকাছি
+      const fullyCleanDataUrl = cleanCanvas.toDataURL("image/jpeg", 0.92);
+      const cleanedImage = await loadImageElement(fullyCleanDataUrl);
+
       const currentDateTime = formatDateTime();
+
       const exifData = sanitizeEnabled
         ? buildSanitizedExif(selectedPreset, currentDateTime, {
             width: cleanedImage.naturalWidth || cleanedImage.width,
@@ -775,15 +886,71 @@ export default function Home() {
           })
         : safeExifLoad(normalized.dataUrl);
 
+      // FIX #1: MakerNote সম্পূর্ণ বাদ — random bytes দেওয়ার চেয়ে না থাকা ভালো
+      delete exifData.Exif[piexif.ExifIFD.MakerNote];
+
+      // FIX #2: GPS — Samsung/iPhone-এ GPSVersionID সবসময় থাকে
+      if (selectedPreset.hasGpsVersionId) {
+        exifData.GPS = {
+          [piexif.GPSIFD.GPSVersionID]: [2, 3, 0, 0],
+        };
+      } else {
+        // Canon DSLR-এ GPS নেই — empty রাখা স্বাভাবিক
+        exifData.GPS = {};
+      }
+
+      exifData.Interop = {};
+
+      // FIX #3: Thumbnail generate করো — real camera সবসময় দেয়
+      const thumbCanvas = document.createElement("canvas");
+      const THUMB_W = 160;
+      const THUMB_H = Math.round((cleanedImage.naturalHeight / cleanedImage.naturalWidth) * THUMB_W);
+      thumbCanvas.width = THUMB_W;
+      thumbCanvas.height = THUMB_H;
+      const thumbCtx = thumbCanvas.getContext("2d");
+      thumbCtx?.drawImage(cleanedImage, 0, 0, THUMB_W, THUMB_H);
+      const thumbDataUrl = thumbCanvas.toDataURL("image/jpeg", 0.6);
+      const thumbBase64 = thumbDataUrl.split(",")[1];
+      const thumbBinary = atob(thumbBase64);
+
+ exifData["1st"] = {
+  [piexif.ImageIFD.JPEGInterchangeFormat]: 0,
+  [piexif.ImageIFD.JPEGInterchangeFormatLength]: thumbBinary.length,
+  [piexif.ImageIFD.Compression]: 6,
+  [piexif.ImageIFD.XResolution]: [72, 1],
+  [piexif.ImageIFD.YResolution]: [72, 1],
+  [piexif.ImageIFD.ResolutionUnit]: 2,
+  [piexif.ImageIFD.Orientation]: 1,
+  256: THUMB_W,   // ImageWidth tag number directly
+  257: THUMB_H,   // ImageLength tag number directly
+};
+      exifData.thumbnail = thumbBinary;
+
+      // preset values override (ensure correct)
       exifData["0th"][piexif.ImageIFD.Make] = selectedPreset.make;
       exifData["0th"][piexif.ImageIFD.Model] = selectedPreset.model;
       exifData["0th"][piexif.ImageIFD.Software] = selectedPreset.software;
       exifData["0th"][piexif.ImageIFD.DateTime] = currentDateTime;
-      
+      exifData.Exif[piexif.ExifIFD.DateTimeOriginal] = currentDateTime;
+      exifData.Exif[piexif.ExifIFD.DateTimeDigitized] = currentDateTime;
       exifData.Exif[piexif.ExifIFD.LensModel] = selectedPreset.lensModel;
 
+      // step 1: empty EXIF দিয়ে পুরানো সব metadata wipe
+      const emptyExif = piexif.dump({
+        "0th": {},
+        Exif: {},
+        GPS: {},
+        Interop: {},
+        "1st": {},
+        thumbnail: null,
+      });
+
+      const cleanedBase = piexif.insert(emptyExif, fullyCleanDataUrl);
+
+      // step 2: real EXIF inject
       const exifBytes = piexif.dump(exifData);
-      const updatedDataUrl = piexif.insert(exifBytes, normalized.dataUrl);
+      const updatedDataUrl = piexif.insert(exifBytes, cleanedBase);
+
       const updatedBlob = await toBlob(updatedDataUrl);
       const deviceFileName = buildDeviceFileName(selectedPreset);
       const updatedFile = new File([updatedBlob], deviceFileName, {
@@ -791,10 +958,11 @@ export default function Home() {
       });
 
       const { metadata: reparsedMetadata } = await readExifMetadata(updatedFile);
+
       const parsedMetadata = stripEmptyMetadata({
-        ...extractPiexifMetadata(updatedDataUrl),
         ...reparsedMetadata,
       });
+
       setUpdatedMetadata({
         ...parsedMetadata,
         Sanitized: sanitizeEnabled ? "Yes" : "No",
@@ -806,6 +974,7 @@ export default function Home() {
         InjectedPresetId: selectedPreset.id,
         InjectedExposureProgram: selectedPreset.exposureProgram,
       });
+
       setDownloadUrl(URL.createObjectURL(updatedBlob));
       setStatus(
         `${selectedPreset.name} preset has been injected${sanitizeEnabled ? " and previous editor/device traces were sanitized" : ""}. You can now download the updated image.`,

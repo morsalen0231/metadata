@@ -14,11 +14,23 @@ export async function POST(request: NextRequest) {
 
     const input = Buffer.from(await file.arrayBuffer());
 
-    const output = await sharp(input)
+    // raw pixel দিয়ে rebuild — কোনো ICC, metadata কিছুই থাকবে না
+    const { data, info } = await sharp(input)
       .flatten({ background: "#ffffff" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const output = await sharp(data, {
+      raw: {
+        width: info.width,
+        height: info.height,
+        channels: info.channels,
+      },
+    })
       .jpeg({
-        quality: 96,
-        mozjpeg: true,
+        quality: 92,
+        chromaSubsampling: "4:2:0",
+        force: true,
       })
       .toBuffer();
 
