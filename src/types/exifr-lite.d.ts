@@ -1,3 +1,3 @@
-declare module "exifr/dist/lite.esm.js" {
+declare module "exifr/dist/full.esm.mjs" {
   export * from "exifr";
 }
